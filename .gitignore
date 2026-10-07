@@ -1,0 +1,17 @@
+kit/out/
+kit/byt.blend
+kit/byt.blend1
+kit/fotky/
+kit/app/index.html
+kit/app/byt.html
+kit/render/__pycache__/
+TASKS.md
+.DS_Store
+# code only: third-party images and data derived from them stay local
+kit/src/*.png
+kit/oresi/
+kit/web/
+kit/site/osm.json
+kit/app/apartment.json
+kit/app/kitchen.json
+kit/app/site.json

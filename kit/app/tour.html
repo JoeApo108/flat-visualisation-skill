@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="cs">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ukázkový byt · prohlídka 360°</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,650&family=Instrument+Sans:wght@500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: full-screen 360° photo; place name top-left, floor-plan map bottom-right, jump arrows on the floor. */
+:root { --ink: #1c2024; --paper: rgba(248, 249, 246, .93); --red: #c42b1c; --muted: #646b72;
+  --display: "Bricolage Grotesque", "Avenir Next", sans-serif; --body: "Instrument Sans", "Helvetica Neue", Arial, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace; }
+html, body { margin: 0; height: 100%; background: #111; overflow: hidden; color: var(--ink); font: 14px/1.4 var(--body); }
+[hidden] { display: none !important; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+canvas:active { cursor: grabbing; }
+.top { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; pointer-events: none; }
+.top > * { pointer-events: auto; }
+.place { background: var(--paper); border-radius: 8px; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+.place small { display: block; font: 500 11px var(--mono); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+.place b { font: 650 20px/1.15 var(--display); }
+.place #light { margin-top: 2px; text-transform: none; letter-spacing: 0; }
+.top a { font: 500 13px var(--body); color: var(--ink); background: var(--paper); border-radius: 999px; padding: 7px 12px; text-decoration: none; box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+.code { position: fixed; left: 16px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); font: 500 11px var(--mono); color: #fff; background: rgba(20,22,25,.6); padding: 6px 9px; border-radius: 4px; max-width: calc(100% - 270px); }
+.map { position: fixed; right: 16px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); width: 210px; background: var(--paper); border-radius: 8px; padding: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+.map .wrap { position: relative; }
+.map img { display: block; width: 100%; height: auto; border-radius: 4px; }
+.map button { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; border: 2px solid #fff; background: #1c2024; padding: 0; cursor: pointer; box-shadow: 0 0 0 1px rgba(0,0,0,.3); }
+.map button[aria-current="true"] { background: var(--red); width: 16px; height: 16px; margin: -8px 0 0 -8px; }
+.map .cone { position: absolute; width: 0; height: 0; pointer-events: none; }
+.map .cone::before { content: ""; position: absolute; left: -16px; top: -34px; width: 32px; height: 34px; background: radial-gradient(farthest-side at 50% 100%, rgba(196,43,28,.55), rgba(196,43,28,0)); clip-path: polygon(50% 100%, 0 0, 100% 0); }
+#spots button { position: fixed; transform: translate(-50%, -50%); border: 0; background: none; cursor: pointer; display: grid; justify-items: center; gap: 4px; padding: 0; }
+#spots button i { width: 44px; height: 44px; border-radius: 50%; background: rgba(248,249,246,.88); box-shadow: 0 0 0 3px rgba(255,255,255,.35), 0 3px 10px rgba(0,0,0,.3); display: grid; place-items: center; font: 650 20px var(--display); color: var(--red); font-style: normal; }
+#spots button span { font: 600 12px var(--body); color: #fff; background: rgba(20,22,25,.65); padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+#spots button:hover i { background: #fff; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+#load { position: fixed; inset: 0; display: grid; place-items: center; font: 500 14px var(--mono); color: #ddd; background: #111; }
+.hint { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); font: 500 13px var(--mono); color: #fff; background: rgba(20,22,25,.6); padding: 8px 12px; border-radius: 6px; pointer-events: none; transition: opacity .6s; }
+@media (max-width: 600px) { .map { width: 150px; } .code { display: none; } .place b { font-size: 17px; } }
+@media (prefers-reduced-motion: reduce) { .hint { transition: none; } }
+</style>
+<div id="load">Načítám prohlídku…</div>
+<div class="top">
+  <div class="place"><small>Ukázkový byt · prohlídka 360°</small><b id="name"></b><small id="light"></small></div>
+  <a href="/" id="back">Konfigurátor</a>
+</div>
+<div id="spots"></div>
+<div class="code" id="code"></div>
+<div class="map"><div class="wrap" id="map"><img src="plan.jpg" alt="Půdorys bytu se stanovišti prohlídky"><div class="cone" id="cone"></div></div></div>
+<div class="hint" id="hint">táhni pro rozhlédnutí · klikni na šipku pro přechod</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script>
+const CODE = '1:P1·F22  2:P9·B·F11·W02  3:P1·T2  4:P1·F16  5:P1·T1';
+// viewpoints in plan metres (x east, y south, data.py); look = initial heading, degrees clockwise from north; sun = has sun layers
+const P = {
+  p_living:  { name: 'Obývací pokoj', xy: [8.30, 2.70], look: 115, sun: 1, to: ['p_kitchen', 'p_window', 'p_hall', 'p_robe'] },   // start: kitchen + window
+  p_kitchen: { name: 'Kuchyň', xy: [11.20, 3.90], look: 75, sun: 1, to: ['p_living', 'p_window', 'p_hall'] },
+  p_window:  { name: 'U okna', xy: [11.00, 5.40], look: 215, sun: 1, to: ['p_living', 'p_kitchen', 'p_robe'] },
+  p_hall:    { name: 'Vstupní hala', xy: [9.30, 0.98], look: 200, sun: 0, to: ['p_living', 'p_wc'] },
+  p_wc:      { name: 'WC', xy: [11.65, 1.00], look: 90, sun: 0, to: ['p_hall'] },
+  p_robe:    { name: 'Šatní kout', xy: [6.60, 5.20], look: 180, sun: 1, to: ['p_bed', 'p_living'] },
+  p_bed:     { name: 'Pokoj', xy: [6.30, 7.80], look: 250, sun: 1, to: ['p_robe', 'p_bath'] },
+  p_bath:    { name: 'Koupelna', xy: [1.20, 8.00], look: 270, sun: 0, to: ['p_bed'] },
+};
+// plan.jpg: orthographic, 14.2 m wide (2000 x 1440 px), centred on plan (6.4, 4.5)
+const PLAN = { cx: 6.4, cy: 4.5, w: 14.2, h: 14.2 * 1440 / 2000 };
+document.getElementById('code').textContent = CODE;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, 1, 1, 1100);
+const geo = new THREE.SphereGeometry(500, 64, 32); geo.scale(-1, 1, 1);
+// light layers rendered in Blender (render/tour_passes.py), log-encoded (tour_layers.sh): sky at 6 Oct 13:00, direct sun at 8 sun
+// positions (sun<k>, rooms with windows), lit windows outside at night, room lamps, LED strips. Light adds up, so the tour mixes them for the
+// configurator's time and switches (sun: the rendered position nearest to the real one), then applies an AgX-like tone curve.
+const LAYERS = ['sky', 'night', 'lamps', 'led'], GAIN = 0.8, EL_REF = 34.66;   // GAIN matched to Blender's AgX render (first flat)
+const SUN_POS = [['2026-12-21', '10:00', 11.86, 152.01], ['2026-12-21', '12:00', 16.51, 179.94], ['2026-03-21', '08:30', 21.94, 118.21], ['2026-03-21', '10:30', 35.91, 148.77],
+  ['2026-03-21', '12:30', 40.06, 186.76], ['2026-06-21', '09:00', 36.22, 96.13], ['2026-06-21', '11:30', 57.67, 136.86], ['2026-06-21', '13:30', 62.86, 193.16]];   // date, time, elevation, azimuth
+const mat = new THREE.ShaderMaterial({
+  uniforms: { sky: { value: null }, sun: { value: null }, night: { value: null }, lamps: { value: null }, led: { value: null }, w: { value: new THREE.Vector4() }, ws: { value: 0 }, tint: { value: new THREE.Vector3(1, 1, 1) } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `
+    uniform sampler2D sky, sun, night, lamps, led; uniform vec4 w; uniform float ws; uniform vec3 tint; varying vec2 vUv;
+    vec3 lin(vec3 v) { return 16.0 * (pow(vec3(1025.0), v) - 1.0) / 1024.0; }   // inverse of v = log(1024 x + 1) / log(1025), x = linear / 16
+    vec3 agx(vec3 v) {   // AgX base contrast, polynomial fit (Wrensch)
+      v = mat3(0.842479, 0.0423282, 0.0423757, 0.0784336, 0.878469, 0.0784336, 0.0792237, 0.0791661, 0.879143) * v;
+      v = (clamp(log2(max(v, 1e-10)), -12.47393, 4.026069) + 12.47393) / 16.49999;
+      vec3 v2 = v * v, v4 = v2 * v2;
+      v = 15.5 * v4 * v2 - 40.14 * v4 * v + 31.96 * v4 - 6.868 * v2 * v + 0.4298 * v2 + 0.1191 * v - 0.00232;
+      return mat3(1.19688, -0.0528969, -0.0529716, -0.0980209, 1.1519, -0.0980435, -0.0990297, -0.0989612, 1.15107) * v;
+    }
+    void main() {
+      vec3 c = (lin(texture2D(sky, vUv).rgb) * tint * w.x + lin(texture2D(sun, vUv).rgb) * ws + lin(texture2D(night, vUv).rgb) * w.y
+              + lin(texture2D(lamps, vUv).rgb) * w.z + lin(texture2D(led, vUv).rgb) * w.w) * ${GAIN.toFixed(2)};
+      gl_FragColor = vec4(clamp(agx(c), 0.0, 1.0), 1.0);
+    }`,
+});
+scene.add(new THREE.Mesh(geo, mat));
+const loader = new THREE.TextureLoader(), cache = {};
+const BLACK = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK.needsUpdate = true;
+const tex = (f) => new Promise((res) => loader.load(`layers/${f}.jpg`, (t) => { t.anisotropy = 4; res(t); }));
+function load(id) {   // base layers + the sun layer for the current sun position (if this viewpoint sees a window)
+  return cache[id] ||= Promise.all(LAYERS.map((l) => tex(`${id}_${l}`)).concat(P[id].sun && SUN.k >= 0 ? [tex(`${id}_sun${SUN.k}`)] : []));
+}
+
+// light from the configurator (?t=&el=&az=&sun=&m=&lamps=&led=; sun = 1 when the configurator sees sun on a window); without it: 21 Mar 10:30, lights off
+const Q = new URLSearchParams(location.search), RAD = Math.PI / 180;
+const L = Q.has('el') ? { t: Q.get('t'), el: +Q.get('el'), az: +Q.get('az'), sun: Q.get('sun') === '1', m: Q.get('m') || 'slunce', lamps: Q.get('lamps') === '1', led: Q.get('led') === '1' }
+  : { t: '2026-03-21T10:30', el: 35.91, az: 148.77, sun: true, m: 'slunce', lamps: false, led: false };
+const airMass = (el) => { const e = Math.max(el, 0); return 1 / (Math.sin(e * RAD) + 0.50572 * (e + 6.07995) ** -1.6364); };
+const directKlx = (el) => (el <= -0.5 ? 0 : 127.5 * Math.exp(-0.21 * airMass(el)) * Math.min(1, (el + 0.5) / 1.5));
+const SUN = (() => {   // nearest rendered sun direction (within 25°) and its weight; none in "Výběr barev", at night or when the windows are in shade
+  if (L.m === 'barvy' || !L.sun || !(L.el > 0)) return { k: -1, w: 0 };
+  const dirv = (el, az) => [Math.cos(el * RAD) * Math.sin(az * RAD), Math.cos(el * RAD) * Math.cos(az * RAD), Math.sin(el * RAD)], a = dirv(L.el, L.az);
+  let best = -1, bd = 1e9;
+  SUN_POS.forEach(([, , el, az], k) => { const b = dirv(el, az), d = Math.acos(Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])) / RAD; if (d < bd) { bd = d; best = k; } });
+  return bd > 25 ? { k: -1, w: 0 } : { k: best, w: directKlx(L.el) / directKlx(SUN_POS[best][2]) };
+})();
+const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+function skyKlx(el) {   // IES clear sky + twilight, as in the configurator
+  if (el >= 0) return 0.8 + 15.5 * Math.sqrt(Math.sin(el * RAD));
+  const T = [[0, 0.8], [-6, 0.0034], [-18, 0.000002]];
+  for (let i = 1; i < T.length; i++) {
+    const [h0, e0] = T[i - 1], [h1, e1] = T[i];
+    if (el >= h1) return 10 ** (Math.log10(e0) + (Math.log10(e1) - Math.log10(e0)) * (el - h0) / (h1 - h0));
+  }
+  return T[T.length - 1][1];
+}
+function skyColour(el) {
+  const mix = (c, d, w) => c.map((x, j) => x + (d[j] - x) * w);
+  const c = mix([0.72, 0.82, 1.0], [1.0, 0.72, 0.55], Math.max(0, 1 - Math.abs(el - 1) / 7) * 0.45);
+  return mix(c, [0.32, 0.38, 0.6], 1 - smooth(-10, 0, el));
+}
+function applyLight() {
+  const real = L.m !== 'barvy', el = real ? L.el : EL_REF, c = skyColour(el), r = skyColour(EL_REF);
+  const t = c.map((x, i) => x / r[i]), mx = Math.max(...t);
+  mat.uniforms.tint.value.set(t[0] / mx, t[1] / mx, t[2] / mx);
+  mat.uniforms.w.value.set(skyKlx(el) / skyKlx(EL_REF), real ? 1 - smooth(-7, -5, el) : 0, +L.lamps, +L.led);
+  mat.uniforms.ws.value = cur && P[cur].sun ? SUN.w : 0;
+  const time = real && L.t ? L.t.replace(/^(\d+)-(\d+)-(\d+)T/, (_, y, m, d) => `${+d}. ${+m}. `) : 'denní světlo';
+  const sp = SUN.k >= 0 ? ` · slunce jako ${+SUN_POS[SUN.k][0].slice(8)}. ${+SUN_POS[SUN.k][0].slice(5, 7)}. ${SUN_POS[SUN.k][1]}` : '';
+  document.getElementById('light').textContent = `${time}${sp} · ${L.led && L.lamps ? 'LED + lampy' : L.led ? 'LED' : 'světla vypnutá'}`;
+  const b = new URLSearchParams({ m: L.m, lamps: +L.lamps, led: +L.led }); if (L.t) b.set('t', L.t);
+  document.getElementById('back').href = '/#' + b;
+}
+addEventListener('keydown', (e) => {   // L: off -> LED strips -> LED + lamps -> off (as in the configurator)
+  if (e.key.toLowerCase() !== 'l' || e.metaKey || e.ctrlKey) return;
+  [L.led, L.lamps] = !L.led && !L.lamps ? [true, false] : L.led && !L.lamps ? [true, true] : [false, false];
+  applyLight();
+});
+// heading (deg clockwise from north) -> sphere longitude; image centre faces north
+let lon = 180, lat = 0, cur = null, fovT = 75;
+const dirOf = (h, la) => { const phi = THREE.MathUtils.degToRad(90 - la), th = THREE.MathUtils.degToRad(180 + h); return new THREE.Vector3(Math.sin(phi) * Math.cos(th), Math.cos(phi), Math.sin(phi) * Math.sin(th)); };
+function headingTo(a, b) { const dx = b[0] - a[0], dy = b[1] - a[1]; return THREE.MathUtils.radToDeg(Math.atan2(dx, -dy)); }
+
+const spots = document.getElementById('spots');
+async function go(id) {
+  const ts = await load(id);
+  LAYERS.forEach((l, i) => (mat.uniforms[l].value = ts[i])); mat.uniforms.sun.value = ts[LAYERS.length] || BLACK;
+  for (const k of Object.keys(cache)) if (k !== id && !P[id].to.includes(k)) { cache[k].then((a) => a.forEach((t) => t.dispose())); delete cache[k]; }   // keep GPU memory to the current spot + neighbours
+  const keepHeading = cur ? lon - 180 : null;
+  cur = id; const p = P[id];
+  lon = 180 + (keepHeading ?? p.look); lat = 0;
+  if (cur) for (const n of p.to) load(n);
+  document.getElementById('name').textContent = p.name;
+  spots.innerHTML = '';
+  for (const n of p.to) {
+    const b = document.createElement('button'); b.id = 'go-' + n;
+    b.innerHTML = '<i>↑</i><span></span>'; b.querySelector('span').textContent = P[n].name;
+    b.dataset.h = headingTo(p.xy, P[n].xy); b.onclick = () => go(n); spots.append(b);
+  }
+  for (const d of document.querySelectorAll('#map button')) d.setAttribute('aria-current', String(d.dataset.id === id));
+  const [mx, my] = mapXY(p.xy); const c = document.getElementById('cone'); c.style.left = mx + '%'; c.style.top = my + '%';
+  document.getElementById('load').hidden = true; applyLight();
+}
+function mapXY([x, y]) { return [((x - (PLAN.cx - PLAN.w / 2)) / PLAN.w) * 100, ((y - (PLAN.cy - PLAN.h / 2)) / PLAN.h) * 100]; }
+const map = document.getElementById('map');
+for (const [id, p] of Object.entries(P)) {
+  const d = document.createElement('button'); d.dataset.id = id; d.title = p.name; d.setAttribute('aria-label', p.name);
+  const [mx, my] = mapXY(p.xy); d.style.left = mx + '%'; d.style.top = my + '%'; d.onclick = () => go(id); map.append(d);
+}
+
+// look around: drag with inertia, wheel / pinch zoom
+let drag = null, vLon = 0, vLat = 0; const pts = new Map();
+const cv = renderer.domElement;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]); drag = { x: e.clientX, y: e.clientY }; vLon = vLat = 0; hideHint(); });
+cv.addEventListener('pointermove', (e) => {
+  if (!pts.has(e.pointerId)) return;
+  const prev = pts.get(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]);
+  if (pts.size === 2) {
+    const [a, b] = [...pts.values()], d1 = Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const other = [...pts.entries()].find(([k]) => k !== e.pointerId)[1], d0 = Math.hypot(prev[0] - other[0], prev[1] - other[1]);
+    fovT = THREE.MathUtils.clamp(fovT * d0 / d1, 35, 95); return;
+  }
+  const k = camera.fov / innerHeight;
+  vLon = (prev[0] - e.clientX) * k; vLat = (e.clientY - prev[1]) * k;   // the photo follows the finger
+  lon += vLon; lat = THREE.MathUtils.clamp(lat + vLat, -80, 80);
+});
+const up = (e) => { pts.delete(e.pointerId); if (!pts.size) drag = null; };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+cv.addEventListener('wheel', (e) => { e.preventDefault(); fovT = THREE.MathUtils.clamp(fovT + e.deltaY * 0.04, 35, 95); hideHint(); }, { passive: false });
+addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') lon -= 5; if (e.key === 'ArrowRight') lon += 5; if (e.key === 'ArrowUp') lat = Math.min(80, lat + 5); if (e.key === 'ArrowDown') lat = Math.max(-80, lat - 5); });
+let hinted = false; function hideHint() { if (!hinted) { hinted = true; document.getElementById('hint').style.opacity = 0; } }
+setTimeout(hideHint, 6000);
+
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+const v = new THREE.Vector3();
+renderer.setAnimationLoop(() => {
+  if (!drag) { lon += vLon; lat = THREE.MathUtils.clamp(lat + vLat, -80, 80); vLon *= 0.92; vLat *= 0.92; }
+  camera.fov += (fovT - camera.fov) * 0.2; camera.updateProjectionMatrix();
+  camera.lookAt(dirOf(lon - 180, lat));
+  for (const b of spots.children) {   // jump arrows sit on the floor in the direction of the next viewpoint
+    v.copy(dirOf(+b.dataset.h, -28)).multiplyScalar(400).project(camera);
+    const vis = v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2;
+    b.hidden = !vis;
+    if (vis) { b.style.left = ((v.x + 1) / 2) * innerWidth + 'px'; b.style.top = ((1 - v.y) / 2) * innerHeight + 'px'; }
+  }
+  document.getElementById('cone').style.transform = `rotate(${lon - 180}deg)`;
+  renderer.render(scene, camera);
+});
+const start = (location.hash.slice(1) in P) ? location.hash.slice(1) : 'p_living';
+go(start);
+</script>
